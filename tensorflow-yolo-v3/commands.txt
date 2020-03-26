@@ -1,0 +1,1 @@
+python /opt/intel/openvino/deployment_tools/model_optimizer/mo_tf.py --input_model frozen_yolo.pb --tensorflow_use_custom_operations_config /opt/intel/openvino/deployment_tools/model_optimizer/extensions/front/tf/yolo_v3.json
