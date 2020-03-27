@@ -4,18 +4,14 @@ You can use this document as a template for providing your project write-up. How
 have a different format you prefer, feel free to use it as long as you answer all required
 questions.
 
-## link to the model and how to convert it to an IR
+## Running the project
 
-The model I used is a darknet YOLO model trained with the COCO dataset I dowloaded from Intel
-https://github.com/mystic123/tensorflow-yolo-v3  GitHub repository (commit ed60b90)
-I obtained yolov3.weights file, that using the weights_pb.py script I transformed in a frozen_darknet_yolov3_model.pb
-Then using the script: 
+For running the video file
 
-python /opt/intel/openvino/deployment_tools/model_optimizer/mo_tf.py --input_model frozen_darknet_yolov3_model.pb --tensorflow_use_custom_operations_config /opt/intel/openvino/deployment_tools/model_optimizer/extensions/front/tf/yolo_v3.json --batch 1
+python main.py -i resources/Pedestrian_Detect_2_1_1.mp4 -m tensorflow-yolo-v3/frozen_darknet_yolov3_model.xml -l /opt/intel/openvino/deployment_tools/inference_engine/lib/intel64/libcpu_extension_sse4.so -d CPU -pt 0.4 | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
+for running a webcam
+python main.py -i CAM -m tensorflow-yolo-v3/frozen_darknet_yolov3_model.xml -l /opt/intel/openvino/deployment_tools/inference_engine/lib/intel64/libcpu_extension_sse4.so -d CPU -pt 0.6 | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 640x480 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
 
-I transformed the YOLO weights to its IR
-
-All this code is in the project repository under the tensorflow-yolo-v3 folder.
 
 
 ## Explaining Custom Layers
@@ -31,17 +27,27 @@ Finally, before using the custom layer in your model with the Inference Engine, 
 ## Comparing Model Performance
 
 My method(s) to compare models before and after conversion to Intermediate Representations were:
-- Processing speed: comparing processing speed in the same environment is usefull to see if model performs faster after transformation in IR. In my case, the YOLOv3 model 
-- Model accuracy
-- Hardware needs
 
-The difference between model accuracy pre- and post-conversion was relatively low
+Comparing processing speed in the same environment is usefull to see if model performs faster after transformation in IR. In my case, I’m using YOLOv3 model for a people detection and tracking task on images taken in a store and I run it on a GPU Nvidia GTX 1080
 
-The size of the model pre- and post-conversion was similar
+The difference obtained is a mean process time of the original YOLO v3 model in  a Nvidia gt 1080 of 0.20 seconds while the OpenVino model with the IR representation obtained is running on the i7 CPU of around 0.19 seconds
+This means that OpenVino is faster.
+Image with a failed detection
 
-The inference time of the model pre- and post-conversion was similar.
 
-The model needs less hardware than the original one for a similar performance
+The difference between model accuracy pre- and post-conversion was quite big, while YOLO v3 model correctlky detected the 6 persons with an accuracy of 95% and failing only on a small number of frames, YOLO IR loosed accuracy and detected 8 persons, failing with two subjects on most of the time he was present
+
+
+
+
+
+
+
+
+
+
+
+The size of the model pre- and post-conversion was similar, the YOLO v3 model pb file is about 248,2 MB while the IR bin file is about 247,7
 
 ## Assess Model Use Cases
 
