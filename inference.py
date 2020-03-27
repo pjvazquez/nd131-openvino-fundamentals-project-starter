@@ -33,7 +33,8 @@ FORMATTER = log.Formatter("%(asctime)s — %(name)s — %(levelname)s — %(mess
 console_handler = log.StreamHandler(sys.stdout)
 console_handler.setFormatter(FORMATTER)
 logger = log.getLogger(__name__)
-logger.setLevel(log.DEBUG)
+logger.setLevel(log.ERROR)
+#logger.setLevel(log.DEBUG)
 logger.addHandler(console_handler)
 
 class Network:

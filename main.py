@@ -36,13 +36,14 @@ import paho.mqtt.client as mqtt
 from argparse import ArgumentParser
 from inference import Network
 from collections import deque
+from csv import DictWriter
 
 FORMATTER = log.Formatter("%(asctime)s — %(name)s — %(levelname)s — %(message)s")
 console_handler = log.StreamHandler(sys.stdout)
 console_handler.setFormatter(FORMATTER)
 logger = log.getLogger(__name__)
 logger.setLevel(log.ERROR)
-logger.setLevel(log.DEBUG)
+#logger.setLevel(log.DEBUG)
 logger.addHandler(console_handler)
 
 # MQTT server environment variables
@@ -135,17 +136,26 @@ def infer_on_stream(args, client):
         log.error("Unable to open video source")
 
     logger.debug( "W+H: " + str(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) + "-" + str(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    
+    t0=0
+    infer_time=0
+    t1=0
+    process_time=0
     request_id = 0
     total_count = 0
     previous_count = 0
+    num_persons_in = 0
     current_count = 0
     stay_time = 0
     max_stay_time = 0
+    mean_stay_time = 0
     max_len=10
+
+    data_list = []
+
     track = deque(maxlen=max_len)
     ### TODO: Loop until stream is over ###
     while capture.isOpened():
+        data_element = {}
         ### TODO: Read from the video capture ###
         flag, frame = capture.read()
         if not flag:
@@ -158,14 +168,17 @@ def infer_on_stream(args, client):
         resh_transposed_resized_frame = transposed_resized_frame.reshape(input_shape)
 
         ### TODO: Start asynchronous inference for specified request ###
+        t0=time.time()
         infer_network.exec_net(request_id, resh_transposed_resized_frame)
         ### TODO: Wait for the result ###
         if infer_network.wait(request_id)== 0:
             ### TODO: Get the results of the inference request ###
             result = infer_network.get_output(request_id, frame.shape, prob_threshold)
+            t1 = time.time()
+            infer_time = t1 - t0
             ### TODO: Extract any desired stats from the results ###
             current_count, bb_frame = count_persons(result,frame)
-
+            process_time = time.time() - t1
             ### TODO: Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
@@ -175,29 +188,43 @@ def infer_on_stream(args, client):
             if num_tracked > previous_count:
                 logger.debug("INTO IF ------------------------------------")
                 start_time = time.time()
-                increase = num_tracked - previous_count
-                total_count += increase
+                num_persons_in = num_tracked - previous_count
+                total_count += num_persons_in
                 previous_count = num_tracked
-                client.publish("person", json.dumps({"total":total_count}))
+                client.publish("person", json.dumps({"total":total_count}), retain=True)
+                # client.publish("person", json.dumps({"count":num_tracked}), retain=True)
             
             ### Topic "person/duration": key of "duration" ###
             if num_tracked < previous_count:
-                stay_time += int(time.time() - start_time)
-                logger.debug("Duration: {}".format(stay_time))
                 previous_count = num_tracked
-            
-            if stay_time > max_stay_time:
-                max_stay_time=stay_time
+                # client.publish("person", json.dumps({"count":num_tracked}), retain=True)
+
+            if num_tracked > 0:
+                stay_time += (time.time() - start_time)/10
+                logger.debug("Duration: {}".format(stay_time))
 
             if total_count > 0:
-                mean_stay_time = max_stay_time/total_count
-                client.publish("person/duration", json.dumps({"duration": mean_stay_time}))
+                mean_stay_time = stay_time/total_count
+                client.publish("person/duration", json.dumps({"duration": int(mean_stay_time)}))
 
-            client.publish("person", json.dumps({"count":num_tracked}))
+            client.publish("person", json.dumps({"count":num_tracked}), retain=True)
             
-        logger.debug("NUM TRACKED: {} - {} - PREVIOUS COUNT: {} - TOTAL COUNT: {}".format(num_tracked, np.sum(track), previous_count, total_count))
+        data_element['time'] = time.strftime("%H:%M:%S", time.localtime())
+        data_element['num_tracked'] = num_persons_in
+        data_element['num_persons_in'] = num_persons_in
+        data_element['previous_count'] = previous_count
+        data_element['total_count'] = total_count
+        data_element['stay_time'] = stay_time
+        data_element['mean_stay_time'] = mean_stay_time
+        data_element['infer_time'] = infer_time
+        data_element['process_time'] = process_time
+
+        data_list.append(data_element)
+
+        logger.debug("NUM TRACKED: {} - {} - PREVIOUS COUNT: {} - TOTAL COUNT: {} - STAY TIME: {}".format(num_tracked, np.sum(track), previous_count, total_count, mean_stay_time))
         key_pressed = cv2.waitKey(60)
         if key_pressed == 27:
+            write_file(data_list)
             capture.release()
             cv2.destroyAllWindows()
             client.disconnect()
@@ -205,15 +232,28 @@ def infer_on_stream(args, client):
 
         ### TODO: Send the frame to the FFMPEG server ###
         logger.debug("Image_size: {}".format(bb_frame.shape))
+
         sys.stdout.buffer.write(bb_frame)
         sys.stdout.flush()
 
         ### TODO: Write an output image if `single_image_mode` ###
         if single_image:
             cv2.imwrite("output.jpg", bb_frame)
+
+    write_file(data_list)
     capture.release()
     cv2.destroyAllWindows()
     client.disconnect()
+
+def write_file(all_data):
+    with open('./spreadsheet.csv','w') as outfile:
+        writer = DictWriter(outfile,('time','num_tracked',
+                'num_persons_in','previous_count',
+                'total_count','stay_time',
+                'mean_stay_time','infer_time',
+                'process_time'))
+        writer.writeheader()
+        writer.writerows(all_data)
 
 def count_persons(detections, image):
     num_detections = 0
