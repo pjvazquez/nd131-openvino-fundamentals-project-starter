@@ -148,11 +148,16 @@ def infer_on_stream(args, client):
     stay_time = 0
     max_stay_time = 0
     mean_stay_time = 0
-    max_len=10
 
+    track_threshold = 0.1
+    max_len=30
+
+    # this list is to transform values in an excel file
     data_list = []
 
+    # queue to accumulate last "max_len" number of detections
     track = deque(maxlen=max_len)
+
     ### TODO: Loop until stream is over ###
     while capture.isOpened():
         data_element = {}
@@ -182,8 +187,13 @@ def infer_on_stream(args, client):
             ### TODO: Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
+            
+            # append number of detections to "track" queue
             track.append(current_count)
-            num_tracked = int(np.ceil(np.sum(track)/10))
+            # proportion of frames with a positive detection 
+            num_tracked = 0
+            if np.sum(track)/max_len > track_threshold:
+                num_tracked = 1
             
             if num_tracked > previous_count:
                 logger.debug("INTO IF ------------------------------------")
@@ -210,7 +220,8 @@ def infer_on_stream(args, client):
             client.publish("person", json.dumps({"count":num_tracked}), retain=True)
             
         data_element['time'] = time.strftime("%H:%M:%S", time.localtime())
-        data_element['num_tracked'] = num_persons_in
+        data_element['current_count'] = current_count
+        data_element['num_tracked'] = num_tracked
         data_element['num_persons_in'] = num_persons_in
         data_element['previous_count'] = previous_count
         data_element['total_count'] = total_count
@@ -218,6 +229,7 @@ def infer_on_stream(args, client):
         data_element['mean_stay_time'] = mean_stay_time
         data_element['infer_time'] = infer_time
         data_element['process_time'] = process_time
+        data_element['result']=result
 
         data_list.append(data_element)
 
@@ -247,11 +259,11 @@ def infer_on_stream(args, client):
 
 def write_file(all_data):
     with open('./spreadsheet.csv','w') as outfile:
-        writer = DictWriter(outfile,('time','num_tracked',
+        writer = DictWriter(outfile,('time','current_count','num_tracked',
                 'num_persons_in','previous_count',
                 'total_count','stay_time',
                 'mean_stay_time','infer_time',
-                'process_time'))
+                'process_time','result'))
         writer.writeheader()
         writer.writerows(all_data)
 
@@ -264,6 +276,11 @@ def count_persons(detections, image):
 
  
 def get_draw_boxes(boxes, image):
+    '''
+        Function that returns the boundinng boxes detected for class "person" 
+        with a confidence greater than 0, paint the bounding boxes on image
+        and counts them
+    '''
     image_h, image_w, _ = image.shape
     num_detections = 0
     for box in boxes:
@@ -272,6 +289,7 @@ def get_draw_boxes(boxes, image):
             if box['confidence'] > 0:
                 cv2.rectangle(image,(box['xmin'], box['ymin']), (box['xmax'], box['ymax']), (0,255,0), 1)
                 num_detections +=1
+
        
     return image, num_detections
 
